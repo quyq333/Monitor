@@ -109,6 +109,7 @@ public class ServerMain {
           String clientId = extractTokenValue(line, "clientId");
           String grantedToken = extractTokenValue(line, "granted");
           boolean granted = "true".equalsIgnoreCase(grantedToken);
+          System.out.println("Screenshot response from " + clientId + ": " + granted);
           if (clientId != null) {
             if (granted) {
               String format = extractTokenValue(line, "format");

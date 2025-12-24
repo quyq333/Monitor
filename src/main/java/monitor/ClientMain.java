@@ -62,20 +62,26 @@ public class ClientMain {
           if (ack.startsWith("CMD:")) {
             String command = ack.substring("CMD:".length()).trim();
             if ("REQUEST_MONITORING".equalsIgnoreCase(command)) {
+              System.out.println("Received REQUEST_MONITORING");
               boolean granted = requestMonitoringApproval(clientId);
               monitoringApproved = granted;
+              System.out.println("Monitoring approval: " + granted);
               writer.write(buildApprovalLine(clientId, granted));
               writer.write("\n");
               writer.flush();
               reader.readLine();
               if (granted) {
                 TimeUnit.SECONDS.sleep(2);
-                writer.write(buildScreenshotLine(clientId, true));
+                String screenshotLine = buildScreenshotLine(clientId, true);
+                System.out.println("Sending screenshot: "
+                    + (screenshotLine.contains("granted=true") ? "granted" : "denied"));
+                writer.write(screenshotLine);
                 writer.write("\n");
                 writer.flush();
                 reader.readLine();
               }
             } else if ("REQUEST_SCREENSHOT".equalsIgnoreCase(command)) {
+              System.out.println("Received REQUEST_SCREENSHOT");
               writer.write(buildScreenshotLine(clientId, monitoringApproved));
               writer.write("\n");
               writer.flush();
