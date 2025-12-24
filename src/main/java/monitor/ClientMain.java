@@ -68,6 +68,13 @@ public class ClientMain {
               writer.write("\n");
               writer.flush();
               reader.readLine();
+              if (granted) {
+                TimeUnit.SECONDS.sleep(2);
+                writer.write(buildScreenshotLine(clientId, true));
+                writer.write("\n");
+                writer.flush();
+                reader.readLine();
+              }
             } else if ("REQUEST_SCREENSHOT".equalsIgnoreCase(command)) {
               writer.write(buildScreenshotLine(clientId, monitoringApproved));
               writer.write("\n");
