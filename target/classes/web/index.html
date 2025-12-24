@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Monitor Web UI</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <header class="hero">
+      <div class="hero__brand">
+        <div class="brand-mark">M</div>
+        <div>
+          <p class="eyebrow">Live system overview</p>
+          <h1>Monitor Control Deck</h1>
+          <p class="subhead">
+            Live CPU, memory, and process counts for every connected client.
+          </p>
+        </div>
+      </div>
+      <div class="hero__meta">
+        <div class="stat">
+          <span class="stat__label">Clients</span>
+          <span class="stat__value" id="statClients">0</span>
+        </div>
+        <div class="stat">
+          <span class="stat__label">Avg CPU</span>
+          <span class="stat__value" id="statCpu">--</span>
+        </div>
+        <div class="stat">
+          <span class="stat__label">Last update</span>
+          <span class="stat__value" id="statUpdated">--</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="grid" id="cards"></main>
+    <div class="toasts" id="toastStack"></div>
+
+    <footer class="footer">
+      <span id="connectionState">Connecting...</span>
+      <span class="dot"></span>
+      <span>Refresh every 2s</span>
+    </footer>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
