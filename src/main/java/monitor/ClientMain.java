@@ -1,26 +1,35 @@
 package monitor;
 
 import com.sun.management.OperatingSystemMXBean;
+import java.awt.AWTException;
+import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
+import java.awt.Robot;
+import java.awt.Toolkit;
+import java.awt.image.BufferedImage;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
 import java.net.Socket;
-import java.awt.GraphicsEnvironment;
-import javax.swing.JOptionPane;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import javax.imageio.ImageIO;
+import javax.swing.JOptionPane;
 
 public class ClientMain {
   private static final int DEFAULT_PORT = 5050;
   private static final int HEARTBEAT_SECONDS = 5;
   private static final int MAX_PROCESSES = 50;
+  private static final String SCREENSHOT_FORMAT = "png";
 
   public static void main(String[] args) throws Exception {
     String host = args.length > 0 ? args[0] : "127.0.0.1";
@@ -35,6 +44,7 @@ public class ClientMain {
     String clientId = args.length > 2 ? args[2] : defaultClientId();
 
     while (true) {
+      boolean monitoringApproved = false;
       try (Socket socket = new Socket(host, port)) {
         socket.setSoTimeout(15000);
         System.out.println("Connected to " + host + ":" + port + " as " + clientId);
@@ -49,12 +59,21 @@ public class ClientMain {
           if (ack == null) {
             throw new IOException("server closed connection");
           }
-          if (ack.startsWith("CMD:REQUEST_MONITORING")) {
-            boolean granted = requestMonitoringApproval(clientId);
-            writer.write(buildApprovalLine(clientId, granted));
-            writer.write("\n");
-            writer.flush();
-            reader.readLine();
+          if (ack.startsWith("CMD:")) {
+            String command = ack.substring("CMD:".length()).trim();
+            if ("REQUEST_MONITORING".equalsIgnoreCase(command)) {
+              boolean granted = requestMonitoringApproval(clientId);
+              monitoringApproved = granted;
+              writer.write(buildApprovalLine(clientId, granted));
+              writer.write("\n");
+              writer.flush();
+              reader.readLine();
+            } else if ("REQUEST_SCREENSHOT".equalsIgnoreCase(command)) {
+              writer.write(buildScreenshotLine(clientId, monitoringApproved));
+              writer.write("\n");
+              writer.flush();
+              reader.readLine();
+            }
           }
           TimeUnit.SECONDS.sleep(HEARTBEAT_SECONDS);
         }
@@ -165,6 +184,27 @@ public class ClientMain {
 
   private static String buildApprovalLine(String clientId, boolean granted) {
     return "APPROVAL clientId=" + clientId + " action=monitoring granted=" + granted;
+  }
+
+  private static String buildScreenshotLine(String clientId, boolean allowed) {
+    if (!allowed) {
+      return "SCREENSHOT clientId=" + clientId + " granted=false";
+    }
+    if (GraphicsEnvironment.isHeadless()) {
+      return "SCREENSHOT clientId=" + clientId + " granted=false reason=headless";
+    }
+    try {
+      BufferedImage image =
+          new Robot()
+              .createScreenCapture(new Rectangle(Toolkit.getDefaultToolkit().getScreenSize()));
+      ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+      ImageIO.write(image, SCREENSHOT_FORMAT, buffer);
+      String encoded = Base64.getEncoder().encodeToString(buffer.toByteArray());
+      return "SCREENSHOT clientId=" + clientId + " granted=true format="
+          + SCREENSHOT_FORMAT + " data=" + encoded;
+    } catch (AWTException | IOException e) {
+      return "SCREENSHOT clientId=" + clientId + " granted=false reason=capture_failed";
+    }
   }
 
   private static class ProcInfo {

@@ -14,6 +14,7 @@ import java.net.Socket;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,6 +27,7 @@ public class ServerMain {
   private final Map<String, ClientStatus> statusByClient = new ConcurrentHashMap<>();
   private final Map<String, Boolean> monitoringAllowedByClient = new ConcurrentHashMap<>();
   private final Map<String, String> pendingCommandByClient = new ConcurrentHashMap<>();
+  private final Map<String, Screenshot> screenshotByClient = new ConcurrentHashMap<>();
   private final ExecutorService pool = Executors.newCachedThreadPool();
   private HttpServer httpServer;
 
@@ -70,6 +72,7 @@ public class ServerMain {
     httpServer = HttpServer.create(new InetSocketAddress(httpPort), 0);
     httpServer.createContext("/api/status", this::handleStatusApi);
     httpServer.createContext("/api/command", this::handleCommandApi);
+    httpServer.createContext("/api/screenshot", this::handleScreenshotApi);
     httpServer.createContext("/", exchange -> serveStatic(exchange, "web/index.html", "text/html"));
     httpServer.createContext("/app.js", exchange -> serveStatic(exchange, "web/app.js", "text/javascript"));
     httpServer.createContext("/app.css", exchange -> serveStatic(exchange, "web/app.css", "text/css"));
@@ -93,6 +96,38 @@ public class ServerMain {
           if (clientId != null && "monitoring".equalsIgnoreCase(action)) {
             pendingCommandByClient.remove(clientId);
             monitoringAllowedByClient.put(clientId, granted);
+            if (!granted) {
+              screenshotByClient.remove(clientId);
+            }
+          }
+          writer.write("OK\n");
+          writer.flush();
+          continue;
+        }
+
+        if (line.startsWith("SCREENSHOT ")) {
+          String clientId = extractTokenValue(line, "clientId");
+          String grantedToken = extractTokenValue(line, "granted");
+          boolean granted = "true".equalsIgnoreCase(grantedToken);
+          if (clientId != null) {
+            if (granted) {
+              String format = extractTokenValue(line, "format");
+              String data = extractTokenValue(line, "data");
+              if (data != null && !data.isEmpty()) {
+                try {
+                  byte[] bytes = Base64.getDecoder().decode(data);
+                  Screenshot shot = new Screenshot();
+                  shot.data = bytes;
+                  shot.format = (format == null || format.isEmpty()) ? "png" : format;
+                  shot.ts = System.currentTimeMillis();
+                  screenshotByClient.put(clientId, shot);
+                } catch (IllegalArgumentException ignored) {
+                  screenshotByClient.remove(clientId);
+                }
+              }
+            } else {
+              screenshotByClient.remove(clientId);
+            }
           }
           writer.write("OK\n");
           writer.flush();
@@ -159,7 +194,43 @@ public class ServerMain {
       exchange.sendResponseHeaders(202, -1);
       return;
     }
+    if ("request_screenshot".equalsIgnoreCase(action)) {
+      if (!isMonitoringAllowed(clientId)) {
+        exchange.sendResponseHeaders(403, -1);
+        return;
+      }
+      pendingCommandByClient.put(clientId, "REQUEST_SCREENSHOT");
+      exchange.sendResponseHeaders(202, -1);
+      return;
+    }
     exchange.sendResponseHeaders(404, -1);
+  }
+
+  private void handleScreenshotApi(HttpExchange exchange) throws IOException {
+    if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+      exchange.sendResponseHeaders(405, -1);
+      return;
+    }
+    String query = exchange.getRequestURI().getRawQuery();
+    String clientId = extractQueryParam(query, "clientId");
+    if (clientId == null || clientId.isEmpty()) {
+      exchange.sendResponseHeaders(400, -1);
+      return;
+    }
+    if (!isMonitoringAllowed(clientId)) {
+      exchange.sendResponseHeaders(403, -1);
+      return;
+    }
+    Screenshot shot = screenshotByClient.get(clientId);
+    if (shot == null || shot.data == null) {
+      exchange.sendResponseHeaders(404, -1);
+      return;
+    }
+    exchange.getResponseHeaders().set("Content-Type", contentTypeForFormat(shot.format));
+    exchange.getResponseHeaders().set("Cache-Control", "no-store");
+    exchange.sendResponseHeaders(200, shot.data.length);
+    exchange.getResponseBody().write(shot.data);
+    exchange.close();
   }
 
   private String buildStatusJson() {
@@ -447,6 +518,20 @@ public class ServerMain {
     return String.format(java.util.Locale.US, "%.4f", value);
   }
 
+  private static String contentTypeForFormat(String format) {
+    if (format == null) {
+      return "application/octet-stream";
+    }
+    String lower = format.toLowerCase();
+    if ("png".equals(lower)) {
+      return "image/png";
+    }
+    if ("jpg".equals(lower) || "jpeg".equals(lower)) {
+      return "image/jpeg";
+    }
+    return "application/octet-stream";
+  }
+
   private static class ClientStatus {
     String clientId;
     long timestamp;
@@ -468,5 +553,11 @@ public class ServerMain {
       }
       return "clientId=" + clientId + " cpu=" + cpu + " ram=" + ram + " processes=" + processCount;
     }
+  }
+
+  private static class Screenshot {
+    byte[] data;
+    String format;
+    long ts;
   }
 }

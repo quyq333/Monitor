@@ -38,6 +38,27 @@
     <main class="grid" id="cards"></main>
     <div class="toasts" id="toastStack"></div>
 
+    <div class="screen-modal" id="screenModal" aria-hidden="true">
+      <div class="screen-modal__backdrop" data-action="close"></div>
+      <div class="screen-modal__panel" role="dialog" aria-modal="true">
+        <div class="screen-modal__header">
+          <h2 id="screenTitle">Screen</h2>
+          <div class="screen-modal__controls">
+            <button class="action-btn action-btn--ghost" type="button" data-action="refresh">
+              Refresh
+            </button>
+            <button class="action-btn" type="button" data-action="close">Close</button>
+          </div>
+        </div>
+        <div class="screen-modal__body">
+          <div class="screen-modal__status" id="screenStatus">Waiting for screenshot...</div>
+          <div class="screen-modal__frame">
+            <img id="screenImage" alt="Client screen" />
+          </div>
+        </div>
+      </div>
+    </div>
+
     <footer class="footer">
       <span id="connectionState">Connecting...</span>
       <span class="dot"></span>

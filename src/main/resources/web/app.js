@@ -4,11 +4,20 @@ const statCpu = document.getElementById("statCpu");
 const statUpdated = document.getElementById("statUpdated");
 const connectionState = document.getElementById("connectionState");
 const toastStack = document.getElementById("toastStack");
+const screenModal = document.getElementById("screenModal");
+const screenTitle = document.getElementById("screenTitle");
+const screenStatus = document.getElementById("screenStatus");
+const screenImage = document.getElementById("screenImage");
 const cardByClient = new Map();
 const statusByClient = new Map();
 
 const POLL_MS = 2000;
 const TOAST_MS = 5000;
+const SCREENSHOT_ATTEMPTS = 8;
+
+let activeScreenClient = null;
+let screenObjectUrl = null;
+let screenPollTimer = null;
 
 function formatPercent(value) {
   if (value == null || Number.isNaN(value)) {
@@ -37,6 +46,9 @@ function createCard(clientId) {
     <div class="actions">
       <button class="action-btn" type="button" data-field="requestBtn">
         Request monitoring
+      </button>
+      <button class="action-btn action-btn--ghost" type="button" data-field="screenBtn">
+        View screen
       </button>
       <span class="action-state" data-field="approvalState"></span>
     </div>
@@ -72,6 +84,7 @@ function updateCard(card, client) {
   const seenText = card.querySelector('[data-field="seenText"]');
   const statusBadge = card.querySelector('[data-field="statusBadge"]');
   const requestBtn = card.querySelector('[data-field="requestBtn"]');
+  const screenBtn = card.querySelector('[data-field="screenBtn"]');
   const approvalState = card.querySelector('[data-field="approvalState"]');
 
   const ramUsed = client.ramUsedMb ?? 0;
@@ -104,6 +117,9 @@ function updateCard(card, client) {
   requestBtn.disabled = !isOnline || approved || pending;
   requestBtn.textContent = pending ? "Request sent" : "Request monitoring";
   requestBtn.dataset.clientId = client.clientId || "";
+
+  screenBtn.disabled = !isOnline || !approved;
+  screenBtn.dataset.clientId = client.clientId || "";
 }
 
 function showToast(message, type) {
@@ -119,6 +135,108 @@ function showToast(message, type) {
     toast.classList.remove("toast--show");
     setTimeout(() => toast.remove(), 200);
   }, TOAST_MS);
+}
+
+function clearScreenImage() {
+  if (screenObjectUrl) {
+    URL.revokeObjectURL(screenObjectUrl);
+    screenObjectUrl = null;
+  }
+}
+
+function openScreenModal(clientId) {
+  if (!screenModal) {
+    return;
+  }
+  activeScreenClient = clientId;
+  if (screenTitle) {
+    screenTitle.textContent = `Screen: ${clientId}`;
+  }
+  if (screenStatus) {
+    screenStatus.textContent = "Requesting screenshot...";
+  }
+  if (screenImage) {
+    screenImage.src = "";
+  }
+  screenModal.classList.add("is-open");
+  screenModal.setAttribute("aria-hidden", "false");
+}
+
+function closeScreenModal() {
+  if (!screenModal) {
+    return;
+  }
+  screenModal.classList.remove("is-open");
+  screenModal.setAttribute("aria-hidden", "true");
+  if (screenPollTimer) {
+    clearTimeout(screenPollTimer);
+    screenPollTimer = null;
+  }
+  clearScreenImage();
+  activeScreenClient = null;
+}
+
+async function requestScreenshot(clientId) {
+  if (!clientId) {
+    return false;
+  }
+  try {
+    const response = await fetch(
+      `/api/command?clientId=${encodeURIComponent(clientId)}&action=request_screenshot`,
+      { method: "POST" },
+    );
+    if (!response.ok) {
+      throw new Error("Request failed");
+    }
+    showToast(`${clientId}: screenshot requested`, "online");
+    return true;
+  } catch (err) {
+    showToast(`${clientId}: screenshot request failed`, "offline");
+    return false;
+  }
+}
+
+async function fetchScreenshot(clientId) {
+  const response = await fetch(
+    `/api/screenshot?clientId=${encodeURIComponent(clientId)}&ts=${Date.now()}`,
+  );
+  if (!response.ok) {
+    return null;
+  }
+  return response.blob();
+}
+
+function waitForScreenshot(clientId, attempts = SCREENSHOT_ATTEMPTS) {
+  if (!clientId) {
+    return;
+  }
+  let tries = 0;
+  const tryFetch = async () => {
+    tries += 1;
+    const blob = await fetchScreenshot(clientId);
+    if (blob) {
+      clearScreenImage();
+      screenObjectUrl = URL.createObjectURL(blob);
+      if (screenImage) {
+        screenImage.src = screenObjectUrl;
+      }
+      if (screenStatus) {
+        screenStatus.textContent = `Captured at ${formatTime(Date.now())}`;
+      }
+      return;
+    }
+    if (tries >= attempts) {
+      if (screenStatus) {
+        screenStatus.textContent = "Screenshot not ready yet.";
+      }
+      return;
+    }
+    if (screenStatus) {
+      screenStatus.textContent = "Waiting for screenshot...";
+    }
+    screenPollTimer = setTimeout(tryFetch, 1000);
+  };
+  tryFetch();
 }
 
 function render(data) {
@@ -171,6 +289,9 @@ function render(data) {
         approved ? "online" : "offline",
       );
     }
+    if (activeScreenClient === id && !approved) {
+      closeScreenModal();
+    }
     statusByClient.set(id, { online: isOnline, monitoringAllowed: approved });
   });
 
@@ -206,10 +327,54 @@ cards.addEventListener("click", (event) => {
   if (!(target instanceof HTMLButtonElement)) {
     return;
   }
-  if (target.dataset.field !== "requestBtn") {
+  if (target.dataset.field === "requestBtn") {
+    requestMonitoring(target.dataset.clientId);
     return;
   }
-  requestMonitoring(target.dataset.clientId);
+  if (target.dataset.field === "screenBtn") {
+    const clientId = target.dataset.clientId;
+    openScreenModal(clientId);
+    requestScreenshot(clientId).then((ok) => {
+      if (ok) {
+        waitForScreenshot(clientId);
+      } else if (screenStatus) {
+        screenStatus.textContent = "Screenshot request failed.";
+      }
+    });
+  }
+});
+
+if (screenModal) {
+  screenModal.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const action = target.dataset.action;
+    if (action === "close") {
+      closeScreenModal();
+    } else if (action === "refresh") {
+      if (!activeScreenClient) {
+        return;
+      }
+      if (screenStatus) {
+        screenStatus.textContent = "Requesting screenshot...";
+      }
+      requestScreenshot(activeScreenClient).then((ok) => {
+        if (ok) {
+          waitForScreenshot(activeScreenClient);
+        } else if (screenStatus) {
+          screenStatus.textContent = "Screenshot request failed.";
+        }
+      });
+    }
+  });
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && screenModal && screenModal.classList.contains("is-open")) {
+    closeScreenModal();
+  }
 });
 
 async function poll() {
